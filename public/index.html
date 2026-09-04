@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>Claude Session Viewer</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <header class="brand">
+        <div class="brand-mark">C</div>
+        <div>
+          <h1>Session Viewer</h1>
+          <p>Claude Code history</p>
+        </div>
+        <button class="icon-button mobile-close" id="closeSidebar" aria-label="关闭会话列表">×</button>
+      </header>
+
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+        <input id="sessionSearch" type="search" placeholder="搜索会话或项目…" autocomplete="off">
+        <kbd>⌘ K</kbd>
+      </div>
+
+      <div class="sidebar-meta">
+        <span id="sessionCount">加载中…</span>
+        <button class="text-button" id="refreshButton">刷新</button>
+      </div>
+      <nav class="session-list" id="sessionList" aria-label="Claude Code 会话"></nav>
+      <footer class="source-info" title="会话数据目录">
+        <span class="status-dot" id="connectionDot"></span>
+        <div><strong id="connectionText">正在连接</strong><small id="sourcePath">~/.claude/projects</small></div>
+      </footer>
+    </aside>
+
+    <main class="main-panel">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-orbit"><span>C</span></div>
+        <h2>选择一个 Claude Code 会话</h2>
+        <p>在左侧选择会话，查看完整交互历史并快速导出 Markdown。</p>
+      </div>
+
+      <section class="session-view hidden" id="sessionView">
+        <header class="topbar">
+          <button class="icon-button menu-button" id="openSidebar" aria-label="打开会话列表">☰</button>
+          <div class="session-heading">
+            <div class="eyebrow"><span class="live-dot"></span> LIVE SESSION</div>
+            <h2 id="sessionTitle"></h2>
+            <div class="session-details" id="sessionDetails"></div>
+          </div>
+          <div class="topbar-actions">
+            <button class="secondary-button" id="copyAllButton">
+              <span>复制全部</span>
+            </button>
+            <button class="primary-button" id="exportAllButton">
+              <span>导出 .md</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="conversation-toolbar">
+          <div><strong id="turnCount">0 次交互</strong><span id="lastUpdated"></span></div>
+          <label class="filter-input">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="contentSearch" type="search" placeholder="筛选当前对话">
+          </label>
+        </div>
+
+        <div class="conversation" id="conversation"></div>
+        <button class="new-content hidden" id="newContentButton">有新内容 · 滚动到底部</button>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

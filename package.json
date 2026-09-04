@@ -1,0 +1,14 @@
+{
+  "name": "claude-session-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local, real-time viewer and Markdown exporter for Claude Code sessions.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
