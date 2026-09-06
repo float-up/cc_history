@@ -17,6 +17,7 @@ const elements = {
   contentSearch: $('#contentSearch'), copyAllButton: $('#copyAllButton'), exportAllButton: $('#exportAllButton'),
   toast: $('#toast'), openSidebar: $('#openSidebar'), closeSidebar: $('#closeSidebar'),
   sidebarBackdrop: $('#sidebarBackdrop'), newContentButton: $('#newContentButton'),
+  previousMessageButton: $('#previousMessageButton'), nextMessageButton: $('#nextMessageButton'),
 };
 
 function escapeHtml(value) {
@@ -171,7 +172,7 @@ function answerCard(turn, index) {
   }, {});
   const tools = Object.entries(toolCounts).map(([name, count]) =>
     `<span class="tool-chip">${escapeHtml(name)}${count > 1 ? ` ×${count}` : ''}</span>`).join('');
-  return `<article class="message assistant">
+  return `<article class="message assistant" data-nav-message="answer">
     <div class="avatar">C</div>
     <div class="message-card">
       <div class="message-label"><span>Claude${turn.model ? ` · ${escapeHtml(turn.model)}` : ''}</span>
@@ -194,12 +195,13 @@ function renderConversation() {
     !query || `${turn.prompt}\n${turn.answer}`.toLowerCase().includes(query));
   if (!visible.length) {
     elements.conversation.innerHTML = '<div class="no-results">当前会话中没有匹配内容</div>';
+    requestAnimationFrame(updateConversationNavigation);
     return;
   }
   elements.conversation.innerHTML = visible.map(({ turn, index }) => `
     <section class="turn">
       <div class="turn-index">INTERACTION ${String(index + 1).padStart(2, '0')}</div>
-      ${turn.prompt ? `<article class="message user">
+      ${turn.prompt ? `<article class="message user" data-nav-message="question">
         <div class="avatar">U</div>
         <div class="message-card">
           <div class="message-label"><span>You · ${escapeHtml(formatRelative(turn.timestamp))}</span>
@@ -210,6 +212,40 @@ function renderConversation() {
       </article>` : ''}
       ${answerCard(turn, index)}
     </section>`).join('');
+  requestAnimationFrame(updateConversationNavigation);
+}
+
+function navigationTargets() {
+  const containerRect = elements.conversation.getBoundingClientRect();
+  return [...elements.conversation.querySelectorAll('[data-nav-message]')].map((element) => ({
+    element,
+    top: element.getBoundingClientRect().top - containerRect.top + elements.conversation.scrollTop,
+  }));
+}
+
+function updateConversationNavigation() {
+  const targets = navigationTargets();
+  const previousCursor = elements.conversation.scrollTop + 16;
+  const nextCursor = elements.conversation.scrollTop + 48;
+  const atTop = elements.conversation.scrollTop <= 2;
+  const atBottom = elements.conversation.scrollTop + elements.conversation.clientHeight >= elements.conversation.scrollHeight - 2;
+  elements.previousMessageButton.disabled = atTop || !targets.some((target) => target.top < previousCursor - 4);
+  elements.nextMessageButton.disabled = atBottom || !targets.some((target) => target.top > nextCursor);
+}
+
+function jumpToMessage(direction) {
+  const targets = navigationTargets();
+  const previousCursor = elements.conversation.scrollTop + 16;
+  const nextCursor = elements.conversation.scrollTop + 48;
+  const target = direction < 0
+    ? targets.filter((item) => item.top < previousCursor - 4).at(-1)
+    : targets.find((item) => item.top > nextCursor);
+  if (!target) return;
+
+  elements.conversation.querySelector('.nav-target')?.classList.remove('nav-target');
+  target.element.classList.add('nav-target');
+  elements.conversation.scrollTo({ top: Math.max(0, target.top - 14), behavior: 'smooth' });
+  setTimeout(() => target.element.classList.remove('nav-target'), 850);
 }
 
 function renderSelected() {
@@ -334,9 +370,12 @@ elements.newContentButton.addEventListener('click', () => {
   elements.conversation.scrollTop = elements.conversation.scrollHeight;
   elements.newContentButton.classList.add('hidden');
 });
+elements.previousMessageButton.addEventListener('click', () => jumpToMessage(-1));
+elements.nextMessageButton.addEventListener('click', () => jumpToMessage(1));
 elements.conversation.addEventListener('scroll', () => {
   const nearBottom = elements.conversation.scrollHeight - elements.conversation.scrollTop - elements.conversation.clientHeight < 100;
   if (nearBottom) elements.newContentButton.classList.add('hidden');
+  updateConversationNavigation();
 });
 document.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
