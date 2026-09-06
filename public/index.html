@@ -70,6 +70,15 @@
         </div>
 
         <div class="conversation" id="conversation"></div>
+        <nav class="conversation-nav" aria-label="对话快速导航">
+          <button id="previousMessageButton" type="button" title="上一个问题或回答" aria-label="跳转到上一个问题或回答">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>
+          </button>
+          <span aria-hidden="true"></span>
+          <button id="nextMessageButton" type="button" title="下一个问题或回答" aria-label="跳转到下一个问题或回答">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </nav>
         <button class="new-content hidden" id="newContentButton">有新内容 · 滚动到底部</button>
       </section>
     </main>
