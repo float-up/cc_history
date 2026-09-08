@@ -5,6 +5,10 @@ const state = {
   sessionQuery: '',
   contentQuery: '',
   loadToken: 0,
+  renderedAnswers: new Map(),
+  streamTimer: null,
+  followStream: true,
+  realtimeTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -40,12 +44,29 @@ function inlineMarkdown(value) {
   return output.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => code[Number(index)]);
 }
 
+function splitTableRow(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+function isTableDivider(line) {
+  const cells = splitTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function renderCodeBlock(code, language = '') {
+  return `<div class="code-block">
+    <div class="code-header"><span>${escapeHtml(language || 'code')}</span><button type="button" class="copy-code">复制代码</button></div>
+    <pre><code>${escapeHtml(code)}</code></pre>
+  </div>`;
+}
+
 function renderMarkdown(markdown) {
   const lines = String(markdown || '').replaceAll('\r\n', '\n').split('\n');
   const html = [];
   let paragraph = [];
   let list = '';
   let inCode = false;
+  let codeFence = '';
   let codeLanguage = '';
   let codeLines = [];
 
@@ -58,22 +79,45 @@ function renderMarkdown(markdown) {
     list = '';
   };
 
-  for (const line of lines) {
-    const fence = line.match(/^```\s*([^\s]*)/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fence = line.match(/^\s*(`{3,}|~{3,})\s*([^\s]*)/);
     if (fence) {
-      closeParagraph(); closeList();
-      if (inCode) {
-        html.push(`<pre><code${codeLanguage ? ` data-language="${escapeHtml(codeLanguage)}"` : ''}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
-        codeLines = []; codeLanguage = ''; inCode = false;
+      if (inCode && fence[1][0] === codeFence[0]) {
+        html.push(renderCodeBlock(codeLines.join('\n'), codeLanguage));
+        codeLines = []; codeFence = ''; codeLanguage = ''; inCode = false;
+      } else if (!inCode) {
+        closeParagraph(); closeList();
+        inCode = true; codeFence = fence[1]; codeLanguage = fence[2] || '';
       } else {
-        inCode = true; codeLanguage = fence[1] || '';
+        codeLines.push(line);
       }
       continue;
     }
     if (inCode) { codeLines.push(line); continue; }
     if (!line.trim()) { closeParagraph(); closeList(); continue; }
 
-    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const nextLine = lines[index + 1] || '';
+    if (line.includes('|') && isTableDivider(nextLine)) {
+      closeParagraph(); closeList();
+      const headers = splitTableRow(line);
+      const alignment = splitTableRow(nextLine).map((cell) => {
+        if (cell.startsWith(':') && cell.endsWith(':')) return 'center';
+        if (cell.endsWith(':')) return 'right';
+        return 'left';
+      });
+      const rows = [];
+      index += 2;
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html.push(`<div class="table-wrap"><table><thead><tr>${headers.map((cell, cellIndex) => `<th class="align-${alignment[cellIndex] || 'left'}">${inlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((_, cellIndex) => `<td class="align-${alignment[cellIndex] || 'left'}">${inlineMarkdown(row[cellIndex] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
     const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
     const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
     const quote = line.match(/^>\s?(.*)$/);
@@ -87,14 +131,18 @@ function renderMarkdown(markdown) {
       closeParagraph();
       const wanted = unordered ? 'ul' : 'ol';
       if (list !== wanted) { closeList(); list = wanted; html.push(`<${list}>`); }
-      html.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
+      const content = (unordered || ordered)[1];
+      const task = unordered && content.match(/^\[([ xX])\]\s+(.+)$/);
+      html.push(task
+        ? `<li class="task-item"><input type="checkbox" disabled${task[1].toLowerCase() === 'x' ? ' checked' : ''}><span>${inlineMarkdown(task[2])}</span></li>`
+        : `<li>${inlineMarkdown(content)}</li>`);
     } else if (quote) {
       closeParagraph(); closeList(); html.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`);
     } else {
       closeList(); paragraph.push(line);
     }
   }
-  if (inCode) html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+  if (inCode) html.push(renderCodeBlock(codeLines.join('\n'), codeLanguage));
   closeParagraph(); closeList();
   return html.join('');
 }
@@ -167,12 +215,14 @@ function renderSessionList() {
 
 function answerCard(turn, index) {
   if (!turn.answer && !turn.tools.length) return '';
+  const displayedAnswer = state.renderedAnswers.has(turn.id) ? state.renderedAnswers.get(turn.id) : turn.answer;
+  const isStreaming = displayedAnswer !== turn.answer;
   const toolCounts = turn.tools.reduce((counts, tool) => {
     counts[tool.name] = (counts[tool.name] || 0) + 1; return counts;
   }, {});
   const tools = Object.entries(toolCounts).map(([name, count]) =>
     `<span class="tool-chip">${escapeHtml(name)}${count > 1 ? ` ×${count}` : ''}</span>`).join('');
-  return `<article class="message assistant" data-nav-message="answer">
+  return `<article class="message assistant" data-nav-message="answer" data-answer-turn="${index}">
     <div class="avatar">C</div>
     <div class="message-card">
       <div class="message-label"><span>Claude${turn.model ? ` · ${escapeHtml(turn.model)}` : ''}</span>
@@ -182,10 +232,63 @@ function answerCard(turn, index) {
           <button class="mini-button save-answer" data-turn="${index}">保存</button>
         </div>
       </div>
-      ${turn.answer ? `<div class="markdown rendered-content">${renderMarkdown(turn.answer)}</div><pre class="raw-markdown hidden">${escapeHtml(turn.answer)}</pre>` : '<div class="markdown"><em>Claude 正在执行工具…</em></div>'}
+      ${turn.answer ? `<div class="markdown rendered-content${isStreaming ? ' streaming' : ''}">${renderMarkdown(displayedAnswer)}</div><pre class="raw-markdown hidden">${escapeHtml(displayedAnswer)}</pre>` : '<div class="markdown tool-running"><span></span>Claude 正在执行工具…</div>'}
       ${tools ? `<details class="tool-summary"><summary>${turn.tools.length} 次工具调用</summary><div class="tool-list">${tools}</div></details>` : ''}
     </div>
   </article>`;
+}
+
+function prepareRenderedAnswers(session, animate) {
+  const liveIds = new Set(session.turns.map((turn) => turn.id));
+  for (const id of state.renderedAnswers.keys()) {
+    if (!liveIds.has(id)) state.renderedAnswers.delete(id);
+  }
+
+  let hasNewContent = false;
+  for (const turn of session.turns) {
+    if (!animate) {
+      state.renderedAnswers.set(turn.id, turn.answer);
+      continue;
+    }
+    if (!state.renderedAnswers.has(turn.id)) state.renderedAnswers.set(turn.id, '');
+    const displayed = state.renderedAnswers.get(turn.id);
+    if (!turn.answer.startsWith(displayed)) state.renderedAnswers.set(turn.id, turn.answer);
+    else if (displayed !== turn.answer) hasNewContent = true;
+  }
+  return hasNewContent;
+}
+
+function streamPendingAnswers() {
+  if (state.streamTimer || !state.session) return;
+
+  const tick = () => {
+    state.streamTimer = null;
+    let hasPending = false;
+    state.session.turns.forEach((turn, index) => {
+      const displayed = state.renderedAnswers.get(turn.id) || '';
+      if (displayed === turn.answer || !turn.answer.startsWith(displayed)) return;
+      const remaining = turn.answer.length - displayed.length;
+      const chunkSize = Math.max(2, Math.ceil(remaining / 80));
+      const nextAnswer = turn.answer.slice(0, displayed.length + chunkSize);
+      state.renderedAnswers.set(turn.id, nextAnswer);
+      hasPending = hasPending || nextAnswer !== turn.answer;
+
+      const card = elements.conversation.querySelector(`[data-answer-turn="${index}"]`);
+      const rendered = card?.querySelector('.rendered-content');
+      const raw = card?.querySelector('.raw-markdown');
+      if (rendered) {
+        rendered.innerHTML = renderMarkdown(nextAnswer);
+        rendered.classList.toggle('streaming', nextAnswer !== turn.answer);
+      }
+      if (raw) raw.textContent = nextAnswer;
+    });
+
+    if (state.followStream) elements.conversation.scrollTop = elements.conversation.scrollHeight;
+    updateConversationNavigation();
+    if (hasPending) state.streamTimer = setTimeout(tick, 20);
+  };
+
+  state.streamTimer = setTimeout(tick, 20);
 }
 
 function renderConversation() {
@@ -196,6 +299,7 @@ function renderConversation() {
   if (!visible.length) {
     elements.conversation.innerHTML = '<div class="no-results">当前会话中没有匹配内容</div>';
     requestAnimationFrame(updateConversationNavigation);
+    streamPendingAnswers();
     return;
   }
   elements.conversation.innerHTML = visible.map(({ turn, index }) => `
@@ -213,6 +317,7 @@ function renderConversation() {
       ${answerCard(turn, index)}
     </section>`).join('');
   requestAnimationFrame(updateConversationNavigation);
+  streamPendingAnswers();
 }
 
 function navigationTargets() {
@@ -289,13 +394,21 @@ async function loadSession(id, isUpdate = false) {
     if (!response.ok) throw new Error('会话加载失败');
     const session = (await response.json()).session;
     if (token !== state.loadToken) return;
-    const previousHeight = elements.conversation.scrollHeight;
+    const sameSession = state.session?.id === session.id;
+    const sessionChanged = sameSession && state.session.fileSize !== session.fileSize;
+    if (!sameSession) {
+      clearTimeout(state.streamTimer);
+      state.streamTimer = null;
+      state.renderedAnswers.clear();
+    }
+    const hasNewContent = prepareRenderedAnswers(session, isUpdate && sameSession);
+    state.followStream = wasNearBottom;
     state.selectedId = id; state.session = session;
     location.hash = encodeURIComponent(id);
     renderSessionList(); renderSelected();
     closeSidebar();
     if (isUpdate && wasNearBottom) elements.conversation.scrollTop = elements.conversation.scrollHeight;
-    else if (isUpdate && elements.conversation.scrollHeight > previousHeight) elements.newContentButton.classList.remove('hidden');
+    else if (isUpdate && (hasNewContent || sessionChanged)) elements.newContentButton.classList.remove('hidden');
     else if (!isUpdate) elements.conversation.scrollTop = 0;
   } catch (error) {
     showToast(error.message);
@@ -315,12 +428,17 @@ function closeSidebar() {
   elements.sidebar.classList.remove('open'); elements.sidebarBackdrop.classList.remove('show');
 }
 
+function scheduleRealtimeRefresh() {
+  clearTimeout(state.realtimeTimer);
+  state.realtimeTimer = setTimeout(loadSessions, 60);
+}
+
 function connectEvents() {
   const events = new EventSource('/api/events');
   events.addEventListener('ready', () => {
     elements.connectionDot.classList.add('connected'); elements.connectionText.textContent = '实时更新已连接';
   });
-  events.addEventListener('sessions', () => loadSessions());
+  events.addEventListener('sessions', scheduleRealtimeRefresh);
   events.onerror = () => {
     elements.connectionDot.classList.remove('connected'); elements.connectionText.textContent = '正在重新连接';
   };
@@ -344,6 +462,11 @@ elements.sessionSearch.addEventListener('input', (event) => { state.sessionQuery
 elements.contentSearch.addEventListener('input', (event) => { state.contentQuery = event.target.value; renderConversation(); });
 elements.refreshButton.addEventListener('click', () => loadSessions());
 elements.conversation.addEventListener('click', (event) => {
+  const codeButton = event.target.closest('.copy-code');
+  if (codeButton) {
+    copyText(codeButton.closest('.code-block')?.querySelector('code')?.textContent || '', '代码已复制');
+    return;
+  }
   const button = event.target.closest('[data-turn]');
   if (!button || !state.session) return;
   const turn = state.session.turns[Number(button.dataset.turn)];
@@ -374,6 +497,7 @@ elements.previousMessageButton.addEventListener('click', () => jumpToMessage(-1)
 elements.nextMessageButton.addEventListener('click', () => jumpToMessage(1));
 elements.conversation.addEventListener('scroll', () => {
   const nearBottom = elements.conversation.scrollHeight - elements.conversation.scrollTop - elements.conversation.clientHeight < 100;
+  state.followStream = nearBottom;
   if (nearBottom) elements.newContentButton.classList.add('hidden');
   updateConversationNavigation();
 });
