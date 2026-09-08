@@ -6,6 +6,7 @@ const { SessionStore, sessionToMarkdown } = require('./lib/session-store');
 
 const PORT = Number(process.env.PORT) || 4312;
 const HOST = process.env.HOST || '127.0.0.1';
+const POLL_INTERVAL = Math.max(100, Number(process.env.POLL_INTERVAL) || 250);
 const CLAUDE_DIR = path.resolve(
   (process.env.CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects'))
     .replace(/^~(?=$|\/)/, os.homedir()),
@@ -14,6 +15,11 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = new SessionStore(CLAUDE_DIR);
 const clients = new Set();
 let lastFingerprint = '';
+try {
+  lastFingerprint = store.fingerprint();
+} catch {
+  // The source directory may become available after startup.
+}
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -61,7 +67,7 @@ function serveStatic(urlPath, res) {
 
 function handleApi(req, res, url) {
   if (url.pathname === '/api/config') {
-    sendJson(res, 200, { source: CLAUDE_DIR, exists: fs.existsSync(CLAUDE_DIR) });
+    sendJson(res, 200, { source: CLAUDE_DIR, exists: fs.existsSync(CLAUDE_DIR), pollInterval: POLL_INTERVAL });
     return true;
   }
 
@@ -138,7 +144,7 @@ setInterval(() => {
   } catch (error) {
     console.error('Unable to watch Claude sessions:', error.message);
   }
-}, 1000).unref();
+}, POLL_INTERVAL).unref();
 
 setInterval(() => {
   for (const client of clients) client.write(': heartbeat\n\n');
